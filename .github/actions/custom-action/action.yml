@@ -1,9 +1,18 @@
-name: Print Secret
-description: Prints the secret value stored in Repository B.
+name: "Print Secret"
+description: "A composite action to print a secret value."
 inputs:
   secret_value:
-    description: The secret value to be printed
+    description: "The secret value to print."
     required: true
+
 runs:
-  using: "node12"
-  main: "index.js"
+  using: "composite"
+  steps:
+    # Step 1: Print an informational message
+    - name: Print Information
+      run: echo "Executing composite action to print a secret."
+
+    # Step 2: Print the secret value
+    # WARNING: This is for demonstration purposes only. DO NOT log actual secrets in production.
+    - name: Print Secret
+      run: echo "The secret value is: ${{ inputs.secret_value }}"
