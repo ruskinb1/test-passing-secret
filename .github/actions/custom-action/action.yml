@@ -1,0 +1,9 @@
+name: Print Secret
+description: Prints the secret value stored in Repository B.
+inputs:
+  secret_value:
+    description: The secret value to be printed
+    required: true
+runs:
+  using: "node12"
+  main: "index.js"
