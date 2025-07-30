@@ -3,7 +3,7 @@ description: "A composite action to print a secret value."
 inputs:
   secret_value:
     description: "The secret value to print."
-    required: true
+    required: false
 
 runs:
   using: "composite"
@@ -15,6 +15,3 @@ runs:
 
     # Step 2: Print the secret value
     # WARNING: This is for demonstration purposes only. DO NOT log actual secrets in production.
-    - name: Print Secret
-      run: echo "The secret value is: ${{ inputs.secret_value }}"
-      shell: bash # Specifies the shell
