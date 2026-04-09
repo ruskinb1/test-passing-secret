@@ -37,10 +37,11 @@ jobs:
     uses: tr/cs-prof_tax-common-utilities/.github/workflows/ultratax-workflow.yaml@main
     with:
       # Set ValidateOnly to true for pull_request events, otherwise use the manual input or default to false
-      ValidateOnly: ${{ github.event_name == 'pull_request' || inputs.ValidateOnly || false }}
+      ValidateOnly: {% raw %}${{ github.event_name == 'pull_request' || inputs.ValidateOnly || false }}{% endraw %}
 
       # For workflow_dispatch, use input; for push/pull_request, default to Test
-      CodeSigningCertificateType: ${{ inputs.CodeSigningCertificateType || 'Test' }}
+
+      CodeSigningCertificateType: {% raw %}${{ inputs.CodeSigningCertificateType || 'Test' }}{% endraw %}
 
       # Comma-separated list of solution files to build (paths relative to the repo root; whitespaces around commas will be trimmed)
       # Example: "src/solution1.sln, src/solution2.sln"
@@ -58,4 +59,4 @@ jobs:
 
       PackableNuspecFiles: "{{ packable_nuspec_files }}"
 
-      PublicationTargets: ${{ inputs.PublicationTargets || '{{ publication_targets }}' }}
+      PublicationTargets: {% raw %}${{ inputs.PublicationTargets || '{{ publication_targets }}' }}{% endraw %}

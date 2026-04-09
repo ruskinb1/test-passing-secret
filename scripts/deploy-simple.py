@@ -7,11 +7,14 @@ import argparse
 import time
 from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
-from github import Github
+from github import Github, Auth
+import github
 
 class SimpleWorkflowDeployer:
     def __init__(self, github_token, batch_id):
-        self.github = Github(github_token)
+        # Fix: Use new PyGithub authentication method
+        auth = Auth.Token(github_token)
+        self.github = Github(auth=auth)
         self.batch_id = batch_id
         self.results = {
             'successful': [],
@@ -19,9 +22,23 @@ class SimpleWorkflowDeployer:
             'prs_created': []
         }
         
-        # Setup Jinja2
-        self.jinja_env = Environment(loader=FileSystemLoader('templates'))
-        self.template = self.jinja_env.get_template('ultratax-workflow.yml.j2')
+        # Setup Jinja2 with custom delimiters to avoid conflicts with GitHub Actions syntax
+        self.jinja_env = Environment(
+            loader=FileSystemLoader('templates'),
+            variable_start_string='{{',
+            variable_end_string='}}',
+            block_start_string='{%',
+            block_end_string='%}',
+            comment_start_string='{#',
+            comment_end_string='#}'
+        )
+        
+        # Load template with error handling
+        try:
+            self.template = self.jinja_env.get_template('ultratax-workflow.yml.j2')
+        except Exception as e:
+            print(f"❌ Error loading template: {str(e)}")
+            raise e
     
     def load_repo_values(self):
         """Load repository-specific values from config file"""
@@ -296,6 +313,7 @@ This PR adds/updates the UltraTax build and deploy workflow configuration.
         
         print(f"✅ Batch {self.batch_id} results saved to output/ directory")
     
+
     def deploy_batch(self, branches_input, file_location, create_prs, dry_run):
         """Deploy workflows to all repositories in this batch"""
         repositories = self.load_batch_repos()
