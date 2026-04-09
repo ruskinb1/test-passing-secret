@@ -143,8 +143,7 @@ jobs:
     
     - name: Update job summary
       run: |
-        echo "## 
-🚀 UltraTax Workflow Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "## 🚀 UltraTax Workflow Deployment Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Total Repositories:** ${{ needs.prepare.outputs.total_repos }}" >> $GITHUB_STEP_SUMMARY
         echo "**Target Branches:** ${{ github.event.inputs.target_branches }}" >> $GITHUB_STEP_SUMMARY
