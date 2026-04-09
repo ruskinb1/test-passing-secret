@@ -136,8 +136,7 @@ def create_summary(results_dir, total_repos):
             
             if len(all_prs) > 10:
                 f.write(f"- ... and {len(all_prs) - 10} more PRs\n")
-            f.write(
-f"\n")
+            f.write(f"\n")
         
         if all_failures:
             f.write(f"### ⚠️ Failed Deployments\n\n")

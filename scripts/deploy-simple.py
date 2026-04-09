@@ -39,8 +39,7 @@ class SimpleWorkflowDeployer:
                 config = json.load(f)
             
             for batch in config['batches']:
-                if
- batch['id'] == self.batch_id:
+                if batch['id'] == self.batch_id:
                     return batch['repositories']
             
             print(f"❌ Batch {self.batch_id} not found in configuration")
@@ -167,8 +166,7 @@ class SimpleWorkflowDeployer:
                         'error': str(e)
                     })
             
-            self
-.results['successful'].append(repo_name)
+            self.results['successful'].append(repo_name)
             
         except Exception as e:
             print(f"    ❌ Repository error: {str(e)}")
@@ -281,8 +279,7 @@ This PR adds/updates the UltraTax build and deploy workflow configuration.
                     f.write(f"❌ {failure['repo']}: {failure['error']}\n")
         
         # Save PR list for this batch
-        if
- self.results['prs_created']:
+        if self.results['prs_created']:
             with open(f'output/batch-{self.batch_id}-prs.txt', 'w') as f:
                 f.write("# Format: repo,pr_number,pr_url,branch\n")
                 for pr in self.results['prs_created']:
