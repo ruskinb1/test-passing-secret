@@ -1,0 +1,18 @@
+{
+  "batches": [
+    {
+      "id": 0,
+      "repositories": [
+        "ruskinb1/test-repo-1",
+        "ruskinb1/test-repo-2",
+        "ruskinb1/test-repo-3"
+      ],
+      "size": 3,
+      "start_index": 0,
+      "end_index": 2
+    }
+  ],
+  "total_repositories": 3,
+  "batch_size": 3,
+  "batch_count": 1
+}
