@@ -1,0 +1,156 @@
+name: Deploy UltraTax Workflows
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branches:
+        description: 'Target branches (comma-separated, e.g., main,develop)'
+        required: true
+        default: 'main'
+        type: string
+      
+      file_location:
+        description: 'Workflow file location in target repos'
+        required: true
+        default: '.github/workflows/build-deploy.yml'
+        type: string
+      
+      repos_file:
+        description: 'Repository list file'
+        required: false
+        default: 'repos.txt'
+        type: string
+      
+      batch_size:
+        description: 'Repos per batch (1-30)'
+        required: false
+        default: '2'
+        type: string
+      
+      create_prs:
+        description: 'Create Pull Requests'
+        required: false
+        default: 'true'
+        type: boolean
+      
+      dry_run:
+        description: 'Dry run - validate only'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  GITHUB_TOKEN: ${{ secrets.WORKFLOW_DEPLOY_TOKEN }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      batches: ${{ steps.create-batches.outputs.batches }}
+      total_repos: ${{ steps.create-batches.outputs.total_repos }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: pip install PyYAML
+    
+    - name: Create batches
+      id: create-batches
+      run: |
+        python scripts/create-batches.py \
+          --repos-file "${{ github.event.inputs.repos_file }}" \
+          --batch-size "${{ github.event.inputs.batch_size }}"
+
+  deploy:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        batch: ${{ fromJson(needs.prepare.outputs.batches) }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: pip install PyGithub PyYAML Jinja2
+    
+    - name: Deploy workflows
+      run: |
+        python scripts/deploy-simple.py \
+          --token "${{ env.GITHUB_TOKEN }}" \
+          --batch-id "${{ matrix.batch }}" \
+          --branches "${{ github.event.inputs.target_branches }}" \
+          --file-location "${{ github.event.inputs.file_location }}" \
+          --create-prs "${{ github.event.inputs.create_prs }}" \
+          --dry-run "${{ github.event.inputs.dry_run }}"
+    
+    - name: Upload results
+      uses: actions/upload-artifact@v4
+      with:
+        name: batch-results-${{ matrix.batch }}
+        path: output/batch-${{ matrix.batch }}-*.txt
+
+  summarize:
+    needs: [prepare, deploy]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: pip install PyYAML
+    
+    - name: Download results
+      uses: actions/download-artifact@v4
+      with:
+        pattern: batch-results-*
+        merge-multiple: true
+        path: results/
+    
+    - name: Create summary
+      run: |
+        python scripts/create-summary.py \
+          --results-dir results/ \
+          --total-repos "${{ needs.prepare.outputs.total_repos }}"
+    
+    - name: Upload summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-summary
+        path: output/summary-*.txt
+    
+    - name: Update job summary
+      run: |
+        echo "## 
+🚀 UltraTax Workflow Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Total Repositories:** ${{ needs.prepare.outputs.total_repos }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Target Branches:** ${{ github.event.inputs.target_branches }}" >> $GITHUB_STEP_SUMMARY
+        echo "**File Location:** ${{ github.event.inputs.file_location }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Dry Run:** ${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ -f output/summary.md ]; then
+          cat output/summary.md >> $GITHUB_STEP_SUMMARY
+        fi

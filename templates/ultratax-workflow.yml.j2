@@ -1,0 +1,61 @@
+name: Build and deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ValidateOnly:
+        description: Please select whether to only validate the build without deploying.
+        required: false
+        type: boolean
+        default: false
+
+      CodeSigningCertificateType:
+        description: Please select the certificate type to use for code signing.
+        required: true
+        type: choice
+        options:
+          - Test
+          - Production
+        default: Test
+
+      PublicationTargets:
+        description: "Comma-separated list of publication targets. Possible values: STest, FTest, DevTest"
+        required: false
+        type: string
+        default: "{{ publication_targets }}"
+
+  push:
+    branches:
+      - dev
+      - '20*-main'
+
+  pull_request:
+
+permissions: write-all
+jobs:
+  pipeline:
+    uses: tr/cs-prof_tax-common-utilities/.github/workflows/ultratax-workflow.yaml@main
+    with:
+      # Set ValidateOnly to true for pull_request events, otherwise use the manual input or default to false
+      ValidateOnly: ${{ github.event_name == 'pull_request' || inputs.ValidateOnly || false }}
+
+      # For workflow_dispatch, use input; for push/pull_request, default to Test
+      CodeSigningCertificateType: ${{ inputs.CodeSigningCertificateType || 'Test' }}
+
+      # Comma-separated list of solution files to build (paths relative to the repo root; whitespaces around commas will be trimmed)
+      # Example: "src/solution1.sln, src/solution2.sln"
+      SolutionFiles: "{{ solution_files }}"
+
+      # Specify the location of NuGet.config if it's not in the default path
+      {% if nuget_config_file %}
+      NugetConfigFile: "{{ nuget_config_file }}"
+      {% else %}
+      # NugetConfigFile: NuGet.config
+      {% endif %}
+
+      # Specify the location of required-git-repos.json if it's not in the default path
+      # RequiredGitReposFile: required-git-repos.json
+
+      PackableNuspecFiles: "{{ packable_nuspec_files }}"
+
+      PublicationTargets: ${{ inputs.PublicationTargets || '{{ publication_targets }}' }}

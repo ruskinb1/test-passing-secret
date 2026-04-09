@@ -1,0 +1,28 @@
+# Default values for repositories not specifically listed
+default:
+  publication_targets: "STest"
+  solution_files: "src/solution.sln"
+  packable_nuspec_files: ""
+  nuget_config_file: ""
+
+# Configuration for test-repo-1
+test-repo-1:
+  publication_targets: "STest, FTest"
+  solution_files: "src/TaxEngine.sln, src/TaxCalculator.sln"
+  packable_nuspec_files: "src/TaxEngine/TaxEngine.nuspec"
+  nuget_config_file: "config/N
+uGet.config"
+
+# Configuration for test-repo-2
+test-repo-2:
+  publication_targets: "DevTest"
+  solution_files: "TaxProcessor.sln"
+  packable_nuspec_files: "TaxProcessor.nuspec, Utils.nuspec"
+  nuget_config_file: ""
+
+# Configuration for test-repo-3
+test-repo-3:
+  publication_targets: "STest, FTest, DevTest"
+  solution_files: "src/MainApp.sln"
+  packable_nuspec_files: "MainApp.nuspec"
+  nuget_config_file: "NuGet.config"
