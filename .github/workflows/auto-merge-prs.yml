@@ -1,0 +1,347 @@
+name: Auto-Merge Deployment PRs
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_name:
+        description: 'Artifact name containing PR data (e.g., ultratax-prs-run-42-1234567890)'
+        required: true
+        type: string
+      
+      workflow_run_id:
+        description: 'Workflow run ID to get artifacts from (leave empty for latest)'
+        required: false
+        type: string
+      
+      merge_method:
+        description: 'Merge method for auto-merge'
+        required: true
+        type: choice
+        options:
+          - merge
+          - squash
+          - rebase
+        default: 'merge'
+      
+      filter_repos:
+        description: 'Filter PRs by repository names (comma-separated, leave empty for all)'
+        required: false
+        type: string
+      
+      max_prs:
+        description: 'Maximum number of PRs to merge (0 = no limit)'
+        required: false
+        type: string
+        default: '0'
+      
+      delay_seconds:
+        description: 'Delay between merges (seconds)'
+        required: false
+        type: string
+        default: '3'
+      
+      skip_checks:
+        description: 'Skip waiting for PR checks to complete'
+        required: false
+        type: boolean
+        default: false
+      
+      dry_run:
+        description: 'Dry run - show what would be merged without actually merging'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+  checks: read
+
+env:
+  GITHUB_TOKEN: ${{ secrets.WORKFLOW_DEPLOY_TOKEN }}
+
+jobs:
+  find-artifacts:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_found: ${{ steps.find-artifact.outputs.found }}
+      run_id: ${{ steps.find-artifact.outputs.run_id }}
+      pr_count: ${{ steps.find-artifact.outputs.pr_count }}
+    
+    steps:
+    - name: Find PR artifacts
+      id: find-artifact
+      run: |
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt update
+        sudo apt install gh
+        
+        echo "${{ env.GITHUB_TOKEN }}" | gh auth login --with-token
+        
+        if [ -n "${{ github.event.inputs.workflow_run_id }}" ]; then
+          run_id="${{ github.event.inputs.workflow_run_id }}"
+          echo "🎯 Using specified run ID: $run_id"
+        else
+          run_id=$(gh run list --workflow="deploy-workflows.yml" --status=completed --limit=10 --json databaseId,conclusion | jq -r '.[] | select(.conclusion == "success") | .databaseId' | head -n1)
+          if [ -z "$run_id" ]; then
+            echo "❌ No successful deployment workflow runs found"
+            echo "found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "🔍 Using latest successful run ID: $run_id"
+        fi
+        
+        artifact_name="${{ github.event.inputs.artifact_name }}"
+        echo "🔍 Looking for artifact: $artifact_name in run $run_id"
+        
+        artifacts=$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts --jq '.artifacts[] | select(.name == "'$artifact_name'")')
+        
+        if [ -z "$artifacts" ]; then
+          echo "❌ Artifact '$artifact_name' not found in run $run_id"
+          echo "📋 Available artifacts:"
+          gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts --jq '.artifacts[].name'
+          echo "found=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        echo "✅ Found artifact: $artifact_name"
+        echo "found=true" >> $GITHUB_OUTPUT
+        echo "run_id=$run_id" >> $GITHUB_OUTPUT
+        echo "pr_count=unknown" >> $GITHUB_OUTPUT
+
+  download-and-merge:
+    needs: find-artifacts
+    runs-on: ubuntu-latest
+    if: needs.find-artifacts.outputs.artifact_found == 'true'
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install PyGithub PyYAML Jinja2
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt update
+        sudo apt install gh
+    
+    - name: Configure GitHub CLI
+      run: |
+        echo "${{ env.GITHUB_TOKEN }}" | gh auth login --with-token
+        gh auth status
+    
+    - name: Download PR artifact
+      run: |
+        echo "📥 Downloading artifact from run ${{ needs.find-artifacts.outputs.run_id }}"
+        gh run download ${{ needs.find-artifacts.outputs.run_id }} --name "${{ github.event.inputs.artifact_name }}" --dir ./pr-data
+        echo "📁Downloaded artifact contents:"
+        find ./pr-data -type f -name "*.json" -o -name "*.txt" -o -name "*.sh" | head -10
+    
+    - name: Locate PR data file
+      id: locate-pr-data
+      run: |
+        pr_file=""
+        
+        if [ -f "./pr-data/all-prs.json" ]; then
+          pr_file="./pr-data/all-prs.json"
+        elif ls ./pr-data/batch-*-prs.json 1> /dev/null 2>&1; then
+          echo "📋 Found batch PR files, combining them..."
+          mkdir -p ./combined
+          echo "[]" > ./combined/all-prs.json
+          
+          for file in ./pr-data/batch-*-prs.json; do
+            if [ -f "$file" ]; then
+              echo "  📄 Processing: $file"
+              jq -s '.[0] + .[1]' ./combined/all-prs.json "$file" > ./combined/temp.json
+              mv ./combined/temp.json ./combined/all-prs.json
+            fi
+          done
+          
+          pr_file="./combined/all-prs.json"
+        else
+          echo "❌ No PR data files found in artifact"
+          echo "📁 Artifact contents:"
+          find ./pr-data -type f | head -20
+          exit 1
+        fi
+        
+        echo "✅ Using PR data file: $pr_file"
+        echo "pr_file=$pr_file" >> $GITHUB_OUTPUT
+        
+        pr_count=$(jq length "$pr_file")
+        echo "📊 Total PRs found: $pr_count"
+        echo "pr_count=$pr_count" >> $GITHUB_OUTPUT
+    
+    - name: Filter PRs
+      id: filter-prs
+      run: |
+        pr_file="${{ steps.locate-pr-data.outputs.pr_file }}"
+        filtered_file="./filtered-prs.json"
+        
+        cp "$pr_file" "$filtered_file"
+        
+        if [ -n "${{ github.event.inputs.filter_repos }}" ]; then
+          echo "🔍 Filtering PRs by repositories: ${{ github.event.inputs.filter_repos }}"
+          repos_filter=$(echo "${{ github.event.inputs.filter_repos }}" | tr ',' '\n' | jq -R . | jq -s .)
+          jq --argjson repos "$repos_filter" '[.[] | select(.repo as $repo | $repos | index($repo))]' "$pr_file" > "$filtered_file"
+          filtered_count=$(jq length "$filtered_file")
+          echo "📊 PRs after repository filter: $filtered_count"
+        fi
+        
+        max_prs="${{ github.event.inputs.max_prs }}"
+        if [ "$max_prs" != "0" ] && [ -n "$max_prs" ]; then
+          echo "🔢 Limiting to maximum $max_prs PRs"
+          jq ".[:$max_prs]" "$filtered_file" > "./limited-prs.json"
+          mv "./limited-prs.json" "$filtered_file"
+          limited_count=$(jq length "$filtered_file")
+          echo "📊 PRs after limit: $limited_count"
+        fi
+        
+        final_count=$(jq length "$filtered_file")
+        echo "📊 Final PR count for merging: $final_count"
+        echo "filtered_file=$filtered_file" >> $GITHUB_OUTPUT
+        echo "final_count=$final_count" >> $GITHUB_OUTPUT
+        
+        echo "📋 PRs to be processed:"
+        jq -r '.[] | "  • \(.repo) PR #\(.pr_number)"' "$filtered_file"
+    
+    - name: Dry run check
+      if: github.event.inputs.dry_run == 'true'
+      run: |
+        echo "🔍 DRY RUN MODE - No PRs will be actually merged"
+        echo ""
+        echo "📊 Summary:"
+        echo "  • Total PRs to merge: ${{ steps.filter-prs.outputs.final_count }}"
+        echo "  • Merge method: ${{ github.event.inputs.merge_method }}"
+        echo "  • Delay between merges: ${{ github.event.inputs.delay_seconds }} seconds"
+        echo "  • Skip checks: ${{ github.event.inputs.skip_checks }}"
+        echo ""
+        echo "📋 PRs that would be merged:"
+        
+        filtered_file="${{ steps.filter-prs.outputs.filtered_file }}"
+        jq -r '.[] | "  \(.repo) PR #\(.pr_number) - \(.pr_url)"' "$filtered_file"
+        
+        echo "✅ Dry run completed. Set dry_run to false to actually merge PRs."
+    
+    - name: Auto-merge PRs
+      if: github.event.inputs.dry_run == 'false'
+      id: auto-merge
+      run: |
+        echo "🚀 Starting auto-merge process..."
+        echo "📊 PRs to merge: ${{ steps.filter-prs.outputs.final_count }}"
+        echo "🔧 Merge method: ${{ github.event.inputs.merge_method }}"
+        echo "⏱️ Delay: ${{ github.event.inputs.delay_seconds }} seconds"
+        echo "🔍 Skip checks: ${{ github.event.inputs.skip_checks }}"
+        echo ""
+        
+        filtered_file="${{ steps.filter-prs.outputs.filtered_file }}"
+        
+        python scripts/auto-merge-prs.py \
+          --token "${{ env.GITHUB_TOKEN }}" \
+          --pr-file "$filtered_file" \
+          --merge-method "${{ github.event.inputs.merge_method }}" \
+          --delay "${{ github.event.inputs.delay_seconds }}" \
+          ${{ github.event.inputs.skip_checks == 'true' && '--no-wait-checks' || '' }}
+        
+        if ls output/merge-results-*.json 1> /dev/null 2>&1; then
+          latest_result=$(ls -t output/merge-results-*.json | head -n1)
+          merged_count=$(jq '.summary.merged' "$latest_result")
+          failed_count=$(jq '.summary.failed' "$latest_result")
+          skipped_count=$(jq '.summary.skipped' "$latest_result")
+          
+          echo "merged_count=$merged_count" >> $GITHUB_OUTPUT
+          echo "failed_count=$failed_count" >> $GITHUB_OUTPUT
+          echo "skipped_count=$skipped_count" >> $GITHUB_OUTPUT
+          
+          echo ""
+          echo "🎉 Auto-merge completed!"
+          echo "✅ Successfully merged: $merged_count"
+          echo "❌ Failed to merge: $failed_count"
+          echo "⚠️ Skipped: $skipped_count"
+        else
+          echo "❌ No merge results found"
+          echo "merged_count=0" >> $GITHUB_OUTPUT
+          echo "failed_count=0" >> $GITHUB_OUTPUT
+          echo "skipped_count=0" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Upload merge results
+      if: github.event.inputs.dry_run == 'false'
+      uses: actions/upload-artifact@v4
+      with:
+        name: auto-merge-results-${{ github.run_number }}
+        path: |
+          output/merge-results-*.json
+          output/merge-summary-*.txt
+        retention-days: 30
+    
+    - name: Update job summary
+      run: |
+        echo "## 🔀 Auto-Merge Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Source Artifact:** ${{ github.event.inputs.artifact_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Source Run ID:** ${{ needs.find-artifacts.outputs.run_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Merge Method:** ${{ github.event.inputs.merge_method }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Total PRs Found:** ${{ steps.locate-pr-data.outputs.pr_count }}" >> $GITHUB_STEP_SUMMARY
+        echo "**PRs Processed:** ${{ steps.filter-prs.outputs.final_count }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Dry Run:** ${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ github.event.inputs.dry_run }}" == "false" ]; then
+          echo "### 📊 Merge Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Successfully Merged:** ${{ steps.auto-merge.outputs.merged_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Failed to Merge:** ${{ steps.auto-merge.outputs.failed_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Skipped:** ${{ steps.auto-merge.outputs.skipped_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.auto-merge.outputs.failed_count }}" -gt "0" ]; then
+            echo "⚠️ **Some PRs failed to merge. Check the merge results artifact for details.**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.auto-merge.outputs.merged_count }}" -gt "0" ]; then
+            echo "🎉 **Successfully merged ${{ steps.auto-merge.outputs.merged_count }} PRs!**" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "🔍 **Dry run completed - no PRs were actually merged**" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ -n "${{ github.event.inputs.filter_repos }}" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository Filter:** ${{ github.event.inputs.filter_repos }}" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ github.event.inputs.max_prs }}" != "0" ]; then
+          echo "**Max PRs Limit:** ${{ github.event.inputs.max_prs }}" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  no-artifact-found:
+    needs: find-artifacts
+    runs-on: ubuntu-latest
+    if: needs.find-artifacts.outputs.artifact_found == 'false'
+    
+    steps:
+    - name: No artifact found
+      run: |
+        echo "❌ No artifact found with name: ${{ github.event.inputs.artifact_name }}"
+        echo ""
+        echo "💡 Troubleshooting tips:"
+        echo "1. Check if the artifact name is correct"
+        echo "2. Verify the workflow run ID (if specified)"
+        echo "3. Ensure the deployment workflow completed successfully"
+        echo "4. Check if the artifact has expired (artifacts have retention periods)"
+        echo ""
+        echo "🔍 To find available artifacts:"
+        echo "1. Go to the Actions tab"
+        echo "2. Find a successful 'Deploy UltraTax Workflows' run"
+        echo "3. Check the artifacts section at the bottom"
+        echo "4. Use the exact artifact name in this workflow"
+        
+        exit 1

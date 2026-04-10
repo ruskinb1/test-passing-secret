@@ -33,11 +33,45 @@ on:
         default: 'true'
         type: boolean
       
+      auto_merge:
+        description: 'Auto-merge PRs after creation'
+        required: false
+        default: 'false'
+        type: boolean
+      
+      merge_method:
+        description: 'Merge method for auto-merge'
+        required: false
+        type: choice
+        options:
+          - merge
+          - squash
+          - rebase
+        default: 'merge'
+      
+      merge_delay:
+        description: 'Delay before auto-merge (minutes)'
+        required: false
+        default: '5'
+        type: string
+      
       dry_run:
         description: 'Dry run - validate only'
         required: false
         default: 'false'
         type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+  checks: write
+  deployments: write
+  pages: write
+  statuses: write
+  repository-projects: write
+  security-events: write
 
 env:
   GITHUB_TOKEN: ${{ secrets.WORKFLOW_DEPLOY_TOKEN }}
@@ -45,9 +79,14 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     outputs:
       batches: ${{ steps.create-batches.outputs.batches }}
       total_repos: ${{ steps.create-batches.outputs.total_repos }}
+      workflow_run_id: ${{ github.run_id }}
+      workflow_run_number: ${{ github.run_number }}
     
     steps:
     - name: Checkout
@@ -61,16 +100,51 @@ jobs:
     - name: Install dependencies
       run: pip install PyYAML
     
+    - name: Display workflow information
+      run: |
+        echo "🚀 UltraTax Workflow Deployment Started"
+        echo "========================================"
+        echo "📊 Workflow Run ID: ${{ github.run_id }}"
+        echo "📊 Workflow Run Number: ${{ github.run_number }}"
+        echo "📊 Repository: ${{ github.repository }}"
+        echo "📊 Actor: ${{ github.actor }}"
+        echo "📊 Ref: ${{ github.ref }}"
+        echo "========================================"
+        echo ""
+        echo "📋 Input Parameters:"
+        echo "  • Target Branches: ${{ github.event.inputs.target_branches }}"
+        echo "  • File Location: ${{ github.event.inputs.file_location }}"
+        echo "  • Repository File: ${{ github.event.inputs.repos_file }}"
+        echo "  • Batch Size: ${{ github.event.inputs.batch_size }}"
+        echo "  • Create PRs: ${{ github.event.inputs.create_prs }}"
+        echo "  • Auto Merge: ${{ github.event.inputs.auto_merge }}"
+        echo "  • Merge Method: ${{ github.event.inputs.merge_method }}"
+        echo "  • Dry Run: ${{ github.event.inputs.dry_run }}"
+        echo "========================================"
+    
     - name: Create batches
       id: create-batches
       run: |
         python scripts/create-batches.py \
           --repos-file "${{ github.event.inputs.repos_file }}" \
           --batch-size "${{ github.event.inputs.batch_size }}"
+    
+    - name: Upload batch config
+      uses: actions/upload-artifact@v4
+      with:
+        name: batch-config-${{ github.run_number }}
+        path: batch-config.json
 
   deploy:
     needs: prepare
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+      issues: write
+      checks: write
+      statuses: write
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -89,26 +163,54 @@ jobs:
     - name: Install dependencies
       run: pip install PyGithub PyYAML Jinja2
     
+    - name: Download batch config
+      uses: actions/download-artifact@v4
+      with:
+        name: batch-config-${{ github.run_number }}
+    
     - name: Deploy workflows
       run: |
+        echo "🔄 Processing Batch ${{ matrix.batch }}"
+        echo "📊 Workflow Run ID: ${{ github.run_id }}"
+        echo "📊 Batch ID: ${{ matrix.batch }}"
+        
         python scripts/deploy-simple.py \
           --token "${{ env.GITHUB_TOKEN }}" \
           --batch-id "${{ matrix.batch }}" \
           --branches "${{ github.event.inputs.target_branches }}" \
           --file-location "${{ github.event.inputs.file_location }}" \
           --create-prs "${{ github.event.inputs.create_prs }}" \
-          --dry-run "${{ github.event.inputs.dry_run }}"
+          --dry-run "${{ github.event.inputs.dry_run }}" \
+          --workflow-run-id "${{ github.run_id }}" \
+          --workflow-run-number "${{ github.run_number }}"
     
-    - name: Upload results
+    - name: Upload batch results
       uses: actions/upload-artifact@v4
       with:
-        name: batch-results-${{ matrix.batch }}
+        name: batch-results-${{ matrix.batch }}-run-${{ github.run_number }}
         path: output/batch-${{ matrix.batch }}-*.txt
+        retention-days: 30
+    
+    - name: Upload PR data
+      if: github.event.inputs.create_prs == 'true' && github.event.inputs.dry_run == 'false'
+      uses: actions/upload-artifact@v4
+      with:
+        name: pr-data-batch-${{ matrix.batch }}-run-${{ github.run_number }}
+        path: output/batch-${{ matrix.batch }}-prs.json
+        retention-days: 30
 
   summarize:
     needs: [prepare, deploy]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     if: always()
+    outputs:
+      has_prs: ${{ steps.check-prs.outputs.has_prs }}
+      total_prs: ${{ steps.check-prs.outputs.total_prs }}
+      artifact_name: ${{ steps.create-artifacts.outputs.artifact_name }}
+      merge_artifact_name: ${{ steps.create-artifacts.outputs.merge_artifact_name }}
     
     steps:
     - name: Checkout
@@ -122,34 +224,376 @@ jobs:
     - name: Install dependencies
       run: pip install PyYAML
     
-    - name: Download results
+    - name: Download batch results
       uses: actions/download-artifact@v4
       with:
-        pattern: batch-results-*
+        pattern: batch-results-*-run-${{ github.run_number }}
         merge-multiple: true
         path: results/
     
+    - name: Download PR data
+      if: github.event.inputs.create_prs == 'true' && github.event.inputs.dry_run == 'false'
+      uses: actions/download-artifact@v4
+      with:
+        pattern: pr-data-batch-*-run-${{ github.run_number }}
+        merge-multiple: true
+        path: pr-data/
+    
     - name: Create summary
       run: |
+        echo "📊 Creating deployment summary..."
+        echo "📊 Workflow Run ID: ${{ github.run_id }}"
+        echo "📊 Workflow Run Number: ${{ github.run_number }}"
+        
         python scripts/create-summary.py \
           --results-dir results/ \
-          --total-repos "${{ needs.prepare.outputs.total_repos }}"
+          --total-repos "${{ needs.prepare.outputs.total_repos }}" \
+          --workflow-run-id "${{ github.run_id }}" \
+          --workflow-run-number "${{ github.run_number }}"
     
-    - name: Upload summary
+    - name: Check for PRs
+      id: check-prs
+      run: |
+        if [ -f "output/all-prs.json" ]; then
+          pr_count=$(jq length output/all-prs.json)
+          echo "has_prs=true" >> $GITHUB_OUTPUT
+          echo "total_prs=$pr_count" >> $GITHUB_OUTPUT
+          echo "✅ Found $pr_count PRs for potential auto-merge"
+        else
+          echo "has_prs=false" >> $GITHUB_OUTPUT
+          echo "total_prs=0" >> $GITHUB_OUTPUT
+          echo "ℹ️ No PRs found"
+        fi
+    
+    - name: Create artifacts with clear names
+      id: create-artifacts
+      run: |
+        run_id="${{ github.run_id }}"
+        run_number="${{ github.run_number }}"
+        
+        artifact_name="ultratax-prs-run-${run_number}-${run_id}"
+        merge_artifact_name="ultratax-merge-ready-run-${run_number}"
+        
+        echo "artifact_name=$artifact_name" >> $GITHUB_OUTPUT
+        echo "merge_artifact_name=$merge_artifact_name" >> $GITHUB_OUTPUT
+        
+        cat > output/artifact-info.json << EOF
+        {
+          "workflow_run_id": "${{ github.run_id }}",
+          "workflow_run_number": "${{ github.run_number }}",
+          "repository": "${{ github.repository }}",
+          "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "actor": "${{ github.actor }}",
+          "ref": "${{ github.ref }}",
+          "inputs": {
+            "target_branches": "${{ github.event.inputs.target_branches }}",
+            "file_location": "${{ github.event.inputs.file_location }}",
+            "create_prs": "${{ github.event.inputs.create_prs }}",
+            "auto_merge": "${{ github.event.inputs.auto_merge }}",
+            "merge_method": "${{ github.event.inputs.merge_method }}",
+            "dry_run": "${{ github.event.inputs.dry_run }}"
+          },
+          "artifacts": {
+            "pr_data": "$artifact_name",
+            "merge_ready": "$merge_artifact_name"
+          },
+          "total_repositories": "${{ needs.prepare.outputs.total_repos }}",
+          "total_prs": "${{ steps.check-prs.outputs.total_prs }}"
+        }
+        EOF
+        
+        echo "📦 Created artifact metadata"
+        cat output/artifact-info.json
+    
+    - name: Upload deployment summary
       uses: actions/upload-artifact@v4
       with:
-        name: deployment-summary
-        path: output/summary-*.txt
+        name: deployment-summary-run-${{ github.run_number }}
+        path: |
+          output/deployment-summary.txt
+          output/summary.md
+          output/artifact-info.json
+        retention-days: 90
     
-    - name: Update job summary
+    - name: Upload PR data for auto-merge
+      if: steps.check-prs.outputs.has_prs == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.create-artifacts.outputs.artifact_name }}
+        path: |
+          output/all-prs.json
+          output/merge-all-prs.sh
+          output/check-pr-status.sh
+          output/artifact-info.json
+        retention-days: 90
+    
+    - name: Upload merge-ready scripts
+      if: steps.check-prs.outputs.has_prs == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.create-artifacts.outputs.merge_artifact_name }}
+        path: |
+          output/merge-all-prs.sh
+          output/squash-merge-all-prs.sh
+          output/selective-merge.sh
+          output/check-pr-status.sh
+          output/artifact-info.json
+        retention-days: 90
+    
+    - name: Display artifact information
+      run: |
+        echo ""
+        echo "🎯 ARTIFACT INFORMATION FOR AUTO-MERGE"
+        echo "========================================"
+        echo "📊 Workflow Run ID: ${{ github.run_id }}"
+        echo "📊 Workflow Run Number: ${{ github.run_number }}"
+        echo "📦 Main PR Artifact: ${{ steps.create-artifacts.outputs.artifact_name }}"
+        echo "📦 Merge Scripts Artifact: ${{ steps.create-artifacts.outputs.merge_artifact_name }}"
+        echo "📊 Total PRs Created: ${{ steps.check-prs.outputs.total_prs }}"
+        echo "========================================"
+        echo ""
+        if [ "${{ steps.check-prs.outputs.has_prs }}" == "true" ]; then
+          echo "🔀 TO AUTO-MERGE THESE PRS:"
+          echo "1. Go to Actions → 'Auto-Merge Deployment PRs'"
+          echo "2. Click 'Run workflow'"
+          echo "3. Use these values:"
+          echo "   • artifact_name: ${{ steps.create-artifacts.outputs.artifact_name }}"
+          echo "   • workflow_run_id: ${{ github.run_id }}"
+          echo "   • merge_method: merge (or squash/rebase)"
+          echo "   • dry_run: false"
+          echo ""
+          echo "🔍 OR FOR DRY RUN FIRST:"
+          echo "   • Set dry_run: true to preview what will be merged"
+          echo ""
+        else
+          echo "ℹ️ No PRs were created in this run"
+        fi
+        echo "========================================"
+    
+    - name: Update job summary with artifact info
       run: |
         echo "## 🚀 UltraTax Workflow Deployment Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Total Repositories:** ${{ needs.prepare.outputs.total_repos }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Target Branches:** ${{ github.event.inputs.target_branches }}" >> $GITHUB_STEP_SUMMARY
-        echo "**File Location:** ${{ github.event.inputs.file_location }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Dry Run:** ${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Deployment Information" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workflow Run ID:** \`${{ github.run_id }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workflow Run Number:** \`${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Total Repositories:** ${{ needs.prepare.outputs.total_repos }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Target Branches:** ${{ github.event.inputs.target_branches }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **File Location:** ${{ github.event.inputs.file_location }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Dry Run:** ${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Auto-merge Enabled:** ${{ github.event.inputs.auto_merge }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.check-prs.outputs.has_prs }}" == "true" ]; then
+          echo "### 🔀 Auto-Merge Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total PRs Created:** ${{ steps.check-prs.outputs.total_prs }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Main Artifact:** \`${{ steps.create-artifacts.outputs.artifact_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Merge Scripts:** \`${{ steps.create-artifacts.outputs.merge_artifact_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 Quick Auto-Merge" >> $GITHUB_STEP_SUMMARY
+          echo "To auto-merge the created PRs:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Go to **Actions** → **Auto-Merge Deployment PRs**" >> $GITHUB_STEP_SUMMARY
+          echo "2. Click **Run workflow**" >> $GITHUB_STEP_SUMMARY
+          echo "3. Use these settings:" >> $GITHUB_STEP_SUMMARY
+          echo "   - **artifact_name:** \`${{ steps.create-artifacts.outputs.artifact_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "   - **workflow_run_id:** \`${{ github.run_id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "   - **merge_method:** \`merge\` (or \`squash\`/\`rebase\`)" >> $GITHUB_STEP_SUMMARY
+          echo "   - **dry_run:** \`false\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+        
         if [ -f output/summary.md ]; then
           cat output/summary.md >> $GITHUB_STEP_SUMMARY
+        fi
+
+  wait-before-merge:
+    needs: [prepare, deploy, summarize]
+    runs-on: ubuntu-latest
+    if: |
+      always() && 
+      needs.summarize.outputs.has_prs == 'true' && 
+      github.event.inputs.auto_merge == 'true' && 
+      github.event.inputs.dry_run == 'false'
+    
+    steps:
+    - name: Wait before auto-merge
+      run: |
+        delay_minutes=${{ github.event.inputs.merge_delay }}
+        echo "⏱️ Waiting $delay_minutes minutes before auto-merge..."
+        echo "🔍 This allows time to review PRs and cancel if needed"
+        echo "⚠️ To cancel auto-merge, cancel this workflow run"
+        echo "📊 Workflow Run ID: ${{ github.run_id }}"
+        echo "📦 Artifact Name: ${{ needs.summarize.outputs.artifact_name }}"
+        
+        delay_seconds=$((delay_minutes * 60))
+        
+        for ((i=1; i<=delay_minutes; i++)); do
+          remaining=$((delay_minutes - i))
+          echo "⏳ $remaining minutes remaining until auto-merge..."
+          sleep 60
+        done
+        
+        echo "✅ Wait period completed, proceeding with auto-merge"
+
+  auto-merge:
+    needs: [prepare, deploy, summarize, wait-before-merge]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    if: |
+      always() && 
+      needs.summarize.outputs.has_prs == 'true' && 
+      github.event.inputs.auto_merge == 'true' && 
+      github.event.inputs.dry_run == 'false' &&
+      needs.wait-before-merge.result == 'success'
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: pip install PyGithub PyYAML Jinja2
+    
+    - name: Download PR data
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ needs.summarize.outputs.artifact_name }}
+        path: pr-data/
+    
+    - name: Install GitHub CLI
+      run: |
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt update
+        sudo apt install gh
+    
+    - name: Configure GitHub CLI
+      run: |
+        echo "${{ env.GITHUB_TOKEN }}" | gh auth login --with-token
+        gh auth status
+    
+    - name: Check PR status before merge
+      run: |
+        echo "🔍 Checking PR status before auto-merge..."
+        echo "📊 Workflow Run ID: ${{ github.run_id }}"
+        echo "📦 Using Artifact: ${{ needs.summarize.outputs.artifact_name }}"
+        
+        python scripts/auto-merge-prs.py \
+          --token "${{ env.GITHUB_TOKEN }}" \
+          --pr-file pr-data/all-prs.json \
+          --merge-method "${{ github.event.inputs.merge_method }}" \
+          --delay 3 \
+          --dry-run
+    
+    - name: Auto-merge PRs
+      id: auto-merge
+      run: |
+        echo "🚀 Starting auto-merge of PRs..."
+        echo "🔧 Merge method: ${{ github.event.inputs.merge_method }}"
+        echo "📊 Total PRs: ${{ needs.summarize.outputs.total_prs }}"
+        echo "📊 Workflow Run ID: ${{ github.run_id }}"
+        echo "📦 Artifact: ${{ needs.summarize.outputs.artifact_name }}"
+        
+        python scripts/auto-merge-prs.py \
+          --token "${{ env.GITHUB_TOKEN }}" \
+          --pr-file pr-data/all-prs.json \
+          --merge-method "${{ github.event.inputs.merge_method }}" \
+          --delay 3
+        
+        if ls output/merge-results-*.json 1> /dev/null 2>&1; then
+          latest_result=$(ls -t output/merge-results-*.json | head -n1)
+          merged_count=$(jq '.summary.merged' "$latest_result")
+          failed_count=$(jq '.summary.failed' "$latest_result")
+          skipped_count=$(jq '.summary.skipped' "$latest_result")
+          
+          echo "merged_count=$merged_count" >> $GITHUB_OUTPUT
+          echo "failed_count=$failed_count" >> $GITHUB_OUTPUT
+          echo "skipped_count=$skipped_count" >> $GITHUB_OUTPUT
+          
+          echo "✅ Auto-merge completed!"
+          echo "📊 Merged: $merged_count"
+          echo "❌ Failed: $failed_count"
+          echo "⚠️ Skipped: $skipped_count"
+        else
+          echo "❌ No merge results found"
+          echo "merged_count=0" >> $GITHUB_OUTPUT
+          echo "failed_count=0" >> $GITHUB_OUTPUT
+          echo "skipped_count=0" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Upload merge results
+      uses: actions/upload-artifact@v4
+      with:
+        name: auto-merge-results-run-${{ github.run_number }}
+        path: |
+          output/merge-results-*.json
+          output/merge-summary-*.txt
+        retention-days: 30
+    
+    - name: Update job summary with merge results
+      run: |
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 🔀 Auto-Merge Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Merge Method:** ${{ github.event.inputs.merge_method }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Successfully Merged:** ${{ steps.auto-merge.outputs.merged_count }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Failed to Merge:** ${{ steps.auto-merge.outputs.failed_count }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Skipped:** ${{ steps.auto-merge.outputs.skipped_count }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.auto-merge.outputs.failed_count }}" -gt "0" ]; then
+          echo "⚠️ **Some PRs failed to merge automatically. Check the merge results artifact for details.**" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ steps.auto-merge.outputs.merged_count }}" -gt "0" ]; then
+          echo "🎉 **Auto-merge completed successfully for ${{ steps.auto-merge.outputs.merged_count }} PRs!**" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  notify-completion:
+    needs: [prepare, deploy, summarize, auto-merge]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Deployment completion notification
+      run: |
+        echo "🎉 UltraTax Workflow Deployment Completed!"
+        echo ""
+        echo "📊 Summary:"
+        echo "  • Workflow Run ID: ${{ github.run_id }}"
+        echo "  • Workflow Run Number: ${{ github.run_number }}"
+        echo "  • Total Repositories: ${{ needs.prepare.outputs.total_repos }}"
+        echo "  • PRs Created: ${{ needs.summarize.outputs.total_prs }}"
+        
+        if [ "${{ needs.summarize.outputs.has_prs }}" == "true" ]; then
+          echo "  • Main Artifact: ${{ needs.summarize.outputs.artifact_name }}"
+          echo "  • Merge Artifact: ${{ needs.summarize.outputs.merge_artifact_name }}"
+        fi
+        
+        if [ "${{ github.event.inputs.auto_merge }}" == "true" ] && [ "${{ needs.auto-merge.result }}" == "success" ]; then
+          echo "  • Auto-merge: Completed"
+          echo "  • Merged PRs: ${{ needs.auto-merge.outputs.merged_count }}"
+          echo "  • Failed Merges: ${{ needs.auto-merge.outputs.failed_count }}"
+        elif [ "${{ github.event.inputs.auto_merge }}" == "true" ]; then
+          echo "  • Auto-merge: Failed or Cancelled"
+        else
+          echo "  • Auto-merge: Disabled"
+        fi
+        
+        echo ""
+        echo "📁 Check the artifacts for detailed results and logs"
+        
+        if [ "${{ needs.summarize.outputs.has_prs }}" == "true" ] && [ "${{ github.event.inputs.auto_merge }}" != "true" ]; then
+          echo ""
+          echo "🔀 To auto-merge PRs later, use:"
+          echo "  • Workflow: Auto-Merge Deployment PRs"
+          echo "  • Artifact: ${{ needs.summarize.outputs.artifact_name }}"
+          echo "  • Run ID: ${{ github.run_id }}"
         fi
