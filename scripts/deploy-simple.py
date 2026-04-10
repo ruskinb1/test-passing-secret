@@ -104,8 +104,7 @@ class SimpleWorkflowDeployer:
             print(f"❌ Repository file not found: {repos_file}")
             print("💡 Creating default repos.txt...")
             with open(repos_file, 'w') as f:
-                f.write("# Add
- your repositories here (format: org/repo-name)\n")
+                f.write("# Addyour repositories here (format: org/repo-name)\n")
                 f.write("# Example:\n")
                 f.write("# your-org/test-repo-1\n")
                 f.write("# your-org/test-repo-2\n")
