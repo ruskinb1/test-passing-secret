@@ -5,10 +5,10 @@ on:
     inputs:
       logLevel:
         description: 'Log level'
-        default: ''
+        default: 'l'
       tags:
         description: 'Test scenario tags'
-        default: ''
+        default: 't'
 
 jobs:
   list-inputs:
