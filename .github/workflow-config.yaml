@@ -1,0 +1,15 @@
+repos:
+  repo-a:
+    main:
+      string_input: "value-for-main"
+      bool_input: true
+    develop:
+      string_input: "value-for-develop"
+      bool_input: false
+  repo-b:
+    main:
+      string_input: "repo-b-main"
+      bool_input: true
+    feature-x:
+      string_input: "repo-b-feature-x"
+      bool_input: false
