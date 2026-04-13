@@ -57,8 +57,16 @@ jobs:
           $stringInputs = @("string_input", "another_string")
           $boolInputs = @("bool_input", "another_bool")
 
+          # Map all possible workflow_call inputs
+          $inputsMap = @{
+            "string_input"   = "${{ inputs.string_input }}"
+            "another_string" = "${{ inputs.another_string }}"
+            "bool_input"     = "${{ inputs.bool_input }}"
+            "another_bool"   = "${{ inputs.another_bool }}"
+          }
+
           function Get-InputValue($inputName) {
-            $wfInput = "${{ inputs[$inputName] }}"
+            $wfInput = $inputsMap[$inputName]
             if ([string]::IsNullOrEmpty($wfInput) -or $wfInput -eq 'null') {
               $yqExpr = ".repos.`"$repo`".`"$branch`"." + $inputName
               Write-Host "YQ Expression: $yqExpr"
