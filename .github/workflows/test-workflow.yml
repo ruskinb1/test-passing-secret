@@ -1,0 +1,19 @@
+name: Test Dynamic Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'Log level'
+        default: 'warning'
+      tags:
+        description: 'Test scenario tags'
+
+jobs:
+  list-inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List Input Keys
+        run: |
+          # Convert inputs context to JSON and parse keys using jq
+          echo '${{ toJSON(inputs) }}' | jq -r 'keys[]'
