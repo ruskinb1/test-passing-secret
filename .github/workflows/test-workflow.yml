@@ -5,9 +5,10 @@ on:
     inputs:
       logLevel:
         description: 'Log level'
-        default: 'warning'
+        default: ''
       tags:
         description: 'Test scenario tags'
+        default: ''
 
 jobs:
   list-inputs:
