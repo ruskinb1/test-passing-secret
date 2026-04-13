@@ -61,7 +61,9 @@ jobs:
             $wfInput = "${{ inputs[$inputName] }}"
             if ([string]::IsNullOrEmpty($wfInput) -or $wfInput -eq 'null') {
               $yqExpr = ".repos.`"$repo`".`"$branch`"." + $inputName
-              return (& "$env:GITHUB_WORKSPACE\yq.exe" e $yqExpr $configPath)
+              Write-Host "YQ Expression: $yqExpr"
+              Write-Host "Config Path: $configPath"
+              return (& "$env:GITHUB_WORKSPACE\yq.exe" e "$yqExpr" "$configPath")
             } else {
               return $wfInput
             }
@@ -87,7 +89,8 @@ jobs:
       - name: Debug resolved config
         shell: pwsh
         run: |
-          Write-Host "string_input: ${{ needs.resolve-config.outputs.string_input }}"
+          Write-Host "string_input: ${{ needs.resolve-config
+.outputs.string_input }}"
           Write-Host "another_string: ${{ needs.resolve-config.outputs.another_string }}"
           Write-Host "bool_input: ${{ needs.resolve-config.outputs.bool_input }}"
           Write-Host "another_bool: ${{ needs.resolve-config.outputs.another_bool }}"
