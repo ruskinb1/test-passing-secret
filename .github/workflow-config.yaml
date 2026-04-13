@@ -1,5 +1,5 @@
 repos:
-  repo-a:
+  url_shortener:
     main:
       string_input: "value-for-main"
       bool_input: true
