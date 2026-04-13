@@ -8,13 +8,13 @@ on:
         default: 'l'
       tags:
         description: 'Test scenario tags'
-        default: 't'
+        default: ''
 
 jobs:
   list-inputs:
     runs-on: ubuntu-latest
     steps:
       - name: List Input Keys
-        run: |
-          # Convert inputs context to JSON and parse keys using jq
-          echo '${{ toJSON(inputs) }}'
+        env:
+          INPUTS_JSON: ${{ toJSON(inputs) }}
+        run: echo "$INPUTS_JSON"
