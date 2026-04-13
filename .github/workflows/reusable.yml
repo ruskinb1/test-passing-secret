@@ -89,8 +89,7 @@ jobs:
       - name: Debug resolved config
         shell: pwsh
         run: |
-          Write-Host "string_input: ${{ needs.resolve-config
-.outputs.string_input }}"
+          Write-Host "string_input: ${{ needs.resolve-config.outputs.string_input }}"
           Write-Host "another_string: ${{ needs.resolve-config.outputs.another_string }}"
           Write-Host "bool_input: ${{ needs.resolve-config.outputs.bool_input }}"
           Write-Host "another_bool: ${{ needs.resolve-config.outputs.another_bool }}"
