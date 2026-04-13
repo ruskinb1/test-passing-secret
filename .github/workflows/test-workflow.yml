@@ -16,4 +16,4 @@ jobs:
       - name: List Input Keys
         run: |
           # Convert inputs context to JSON and parse keys using jq
-          echo '${{ toJSON(inputs) }}' | jq -r 'keys[]'
+          echo '${{ toJSON(inputs) }}'
