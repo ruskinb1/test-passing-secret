@@ -2,14 +2,11 @@ repos:
   url_shortener:
     main:
       string_input: "value-for-main"
+      another_string: "hello"
       bool_input: true
+      another_bool: false
     develop:
       string_input: "value-for-develop"
+      another_string: "dev-hello"
       bool_input: false
-  repo-b:
-    main:
-      string_input: "repo-b-main"
-      bool_input: true
-    feature-x:
-      string_input: "repo-b-feature-x"
-      bool_input: false
+      another_bool: true
