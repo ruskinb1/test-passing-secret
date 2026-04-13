@@ -53,11 +53,10 @@ jobs:
           BOOL_INPUT=$(yq ".repos[\"$REPO\"][\"$BRANCH\"].bool_input" "$CONFIG_PATH")
           echo "string_input=$STRING_INPUT" >> $GITHUB_OUTPUT
           echo "bool_input=$BOOL_INPUT" >> $GITHUB_OUTPUT
-
+      
       - name: Set outputs (prefer direct input, fallback to config)
         id: set-outputs
         run: |
-          # Use direct input if provided, else config value
           STRING_INPUT="${{ inputs.string_input }}"
           BOOL_INPUT="${{ inputs.bool_input }}"
           if [[ -z "$STRING_INPUT" || "$STRING_INPUT" == 'null' ]]; then
@@ -66,6 +65,11 @@ jobs:
           if [[ -z "$BOOL_INPUT" || "$BOOL_INPUT" == 'null' ]]; then
             BOOL_INPUT="${{ steps.read-config.outputs.bool_input }}"
           fi
+          # Normalize boolean to true/false string
+          if [[ "$BOOL_INPUT" == "True" ]]; then BOOL_INPUT="true"; fi
+          if [[ "$BOOL_INPUT" == "False" ]]; then BOOL_INPUT="false"; fi
+          echo "Final STRING_INPUT=$STRING_INPUT"
+          echo "Final BOOL_INPUT=$BOOL_INPUT"
           echo "string_input=$STRING_INPUT" >> $GITHUB_OUTPUT
           echo "bool_input=$BOOL_INPUT" >> $GITHUB_OUTPUT
 
