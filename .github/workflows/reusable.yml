@@ -18,7 +18,7 @@ on:
 
 jobs:
   resolve-config:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       string_input: ${{ steps.set-outputs.outputs.string_input }}
       bool_input: ${{ steps.set-outputs.outputs.bool_input }}
@@ -30,54 +30,60 @@ jobs:
           ref: main
           path: reusable-repo
 
-      - name: Install yq
+      - name: Download yq for Windows
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip
-          pip install yq
+          Invoke-WebRequest -Uri "https://github.com/mikefarah/yq/releases/latest/download/yq_windows_amd64.exe" -OutFile "$env:GITHUB_WORKSPACE\yq.exe"
 
-      - name: Read config file
-        id: read-config
-        run: |
-          REPO="${GITHUB_REPOSITORY##*/}"
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            BRANCH="${GITHUB_HEAD_REF}"
-          else
-            BRANCH="${GITHUB_REF##*/}"
-          fi
-          CONFIG_PATH="${{ inputs.config_path }}"
-          echo "REPO=$REPO"
-          echo "BRANCH=$BRANCH"
-          cat $CONFIG_PATH
-          STRING_INPUT=$(yq ".repos[\"$REPO\"][\"$BRANCH\"].string_input" "$CONFIG_PATH")
-          BOOL_INPUT=$(yq ".repos[\"$REPO\"][\"$BRANCH\"].bool_input" "$CONFIG_PATH")
-          echo "string_input=$STRING_INPUT" >> $GITHUB_OUTPUT
-          echo "bool_input=$BOOL_INPUT" >> $GITHUB_OUTPUT
-      
-      - name: Set outputs (prefer direct input, fallback to config)
+      - name: Read config file and set outputs
         id: set-outputs
+        shell: pwsh
         run: |
-          STRING_INPUT="${{ inputs.string_input }}"
-          BOOL_INPUT="${{ inputs.bool_input }}"
-          if [[ -z "$STRING_INPUT" || "$STRING_INPUT" == 'null' ]]; then
-            STRING_INPUT="${{ steps.read-config.outputs.string_input }}"
-          fi
-          if [[ -z "$BOOL_INPUT" || "$BOOL_INPUT" == 'null' ]]; then
-            BOOL_INPUT="${{ steps.read-config.outputs.bool_input }}"
-          fi
-          # Normalize boolean to true/false string
-          if [[ "$BOOL_INPUT" == "True" ]]; then BOOL_INPUT="true"; fi
-          if [[ "$BOOL_INPUT" == "False" ]]; then BOOL_INPUT="false"; fi
-          echo "Final STRING_INPUT=$STRING_INPUT"
-          echo "Final BOOL_INPUT=$BOOL_INPUT"
-          echo "string_input=$STRING_INPUT" >> $GITHUB_OUTPUT
-          echo "bool_input=$BOOL_INPUT" >> $GITHUB_OUTPUT
+          $env:PATH += ";$env:GITHUB_WORKSPACE"
+          $repo = "${env:GITHUB_REPOSITORY}".Split('/')[1]
+          if ("${env:GITHUB_EVENT_NAME}" -eq "pull_request") {
+            $branch = "${env:GITHUB_HEAD_REF}"
+          } else {
+            $branch = "${env:GITHUB_REF}".Split('/')[-1]
+          }
+          $configPath = "${{ inputs.config_path }}"
+          Write-Host "REPO=$repo"
+          Write-Host "BRANCH=$branch"
+          Get-Content $configPath | Write-Host
+
+          # Read values from YAML
+          $stringInput = & "$env:GITHUB_WORKSPACE\yq.exe" e ".repos.\"$repo\".\"$branch\".string_input" $configPath
+          $boolInput = & "$env:GITHUB_WORKSPACE\yq.exe" e ".repos.\"$repo\".\"$branch\".bool_input" $configPath
+
+          Write-Host "YQ STRING_INPUT=$stringInput"
+          Write-Host "YQ BOOL_INPUT=$boolInput"
+
+          # Use direct input if provided, else config value
+          $finalStringInput = "${{ inputs.string_input }}"
+          if ([string]::IsNullOrEmpty($finalStringInput) -or $finalStringInput -eq 'null') {
+            $finalStringInput = $stringInput
+          }
+          $finalBoolInput = "${{ inputs.bool_input }}"
+          if ([string]::IsNullOrEmpty($finalBoolInput) -or $finalBoolInput -eq 'null') {
+            $finalBoolInput = $boolInput
+          }
+
+          # Normalize boolean to 'true' or 'false'
+          if ($finalBoolInput -eq "True") { $finalBoolInput = "true" }
+          if ($finalBoolInput -eq "False") { $finalBoolInput = "false" }
+
+          Write-Host "Final STRING_INPUT=$finalStringInput"
+          Write-Host "Final BOOL_INPUT=$finalBoolInput"
+
+          "string_input=$finalStringInput" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "bool_input=$finalBoolInput" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
   debug-config:
     needs: resolve-config
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - name: Debug resolved config
+        shell: pwsh
         run: |
-          echo "String input: ${{ needs.resolve-config.outputs.string_input }}"
-          echo "Boolean input: ${{ needs.resolve-config.outputs.bool_input }}"
+          Write-Host "String input: ${{ needs.resolve-config.outputs.string_input }}"
+          Write-Host "Boolean input: ${{ needs.resolve-config.outputs.bool_input }}"
