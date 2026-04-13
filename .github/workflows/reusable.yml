@@ -10,18 +10,24 @@ on:
       string_input:
         required: false
         type: string
-        description: 'Override string input'
+      another_string:
+        required: false
+        type: string
       bool_input:
         required: false
-        type: boolean
-        description: 'Override boolean input'
+        type: string
+      another_bool:
+        required: false
+        type: string
 
 jobs:
   resolve-config:
     runs-on: windows-latest
     outputs:
       string_input: ${{ steps.set-outputs.outputs.string_input }}
+      another_string: ${{ steps.set-outputs.outputs.another_string }}
       bool_input: ${{ steps.set-outputs.outputs.bool_input }}
+      another_bool: ${{ steps.set-outputs.outputs.another_bool }}
     steps:
       - name: Checkout reusable workflow repo
         uses: actions/checkout@v4
@@ -35,48 +41,44 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://github.com/mikefarah/yq/releases/latest/download/yq_windows_amd64.exe" -OutFile "$env:GITHUB_WORKSPACE\yq.exe"
 
-      - name: Read config file and set outputs
+      - name: Dynamically resolve and output all inputs
         id: set-outputs
         shell: pwsh
         run: |
           $env:PATH += ";$env:GITHUB_WORKSPACE"
-          $repo = "${env:GITHUB_REPOSITORY}".Split('/')[1]
+          $repo = "${env:GITHUB_REPOSITORY}".Split('/')[-1]
           if ("${env:GITHUB_EVENT_NAME}" -eq "pull_request") {
             $branch = "${env:GITHUB_HEAD_REF}"
           } else {
             $branch = "${env:GITHUB_REF}".Split('/')[-1]
           }
           $configPath = "${{ inputs.config_path }}"
-          Write-Host "REPO=$repo"
-          Write-Host "BRANCH=$branch"
-          Get-Content $configPath | Write-Host
 
-          # Read values from YAML
-          $stringInput = & "$env:GITHUB_WORKSPACE\yq.exe" e ".repos.\"$repo\".\"$branch\".string_input" $configPath
-          $boolInput = & "$env:GITHUB_WORKSPACE\yq.exe" e ".repos.\"$repo\".\"$branch\".bool_input" $configPath
+          $stringInputs = @("string_input", "another_string")
+          $boolInputs = @("bool_input", "another_bool")
 
-          Write-Host "YQ STRING_INPUT=$stringInput"
-          Write-Host "YQ BOOL_INPUT=$boolInput"
-
-          # Use direct input if provided, else config value
-          $finalStringInput = "${{ inputs.string_input }}"
-          if ([string]::IsNullOrEmpty($finalStringInput) -or $finalStringInput -eq 'null') {
-            $finalStringInput = $stringInput
-          }
-          $finalBoolInput = "${{ inputs.bool_input }}"
-          if ([string]::IsNullOrEmpty($finalBoolInput) -or $finalBoolInput -eq 'null') {
-            $finalBoolInput = $boolInput
+          function Get-InputValue($inputName) {
+            $wfInput = "${{ inputs[$inputName] }}"
+            if ([string]::IsNullOrEmpty($wfInput) -or $wfInput -eq 'null') {
+              $yqExpr = ".repos.`"$repo`".`"$branch`"." + $inputName
+              return (& "$env:GITHUB_WORKSPACE\yq.exe" e $yqExpr $configPath)
+            } else {
+              return $wfInput
+            }
           }
 
-          # Normalize boolean to 'true' or 'false'
-          if ($finalBoolInput -eq "True") { $finalBoolInput = "true" }
-          if ($finalBoolInput -eq "False") { $finalBoolInput = "false" }
+          foreach ($inputName in $stringInputs) {
+            $val = Get-InputValue $inputName
+            Write-Host "$inputName=$val"
+            "$inputName=$val" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
 
-          Write-Host "Final STRING_INPUT=$finalStringInput"
-          Write-Host "Final BOOL_INPUT=$finalBoolInput"
-
-          "string_input=$finalStringInput" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "bool_input=$finalBoolInput" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          foreach ($inputName in $boolInputs) {
+            $val = Get-InputValue $inputName
+            if ($val.ToString().ToLower() -eq "true") { $boolString = "true" }
+            else { $boolString = "false" }
+            Write-Host "$inputName=$boolString"
+            "$inputName=$boolString" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
   debug-config:
     needs: resolve-config
@@ -85,5 +87,29 @@ jobs:
       - name: Debug resolved config
         shell: pwsh
         run: |
-          Write-Host "String input: ${{ needs.resolve-config.outputs.string_input }}"
-          Write-Host "Boolean input: ${{ needs.resolve-config.outputs.bool_input }}"
+          Write-Host "string_input: ${{ needs.resolve-config.outputs.string_input }}"
+          Write-Host "another_string: ${{ needs.resolve-config.outputs.another_string }}"
+          Write-Host "bool_input: ${{ needs.resolve-config.outputs.bool_input }}"
+          Write-Host "another_bool: ${{ needs.resolve-config.outputs.another_bool }}"
+
+  check-booleans:
+    needs: resolve-config
+    runs-on: windows-latest
+    steps:
+      - name: Check boolean conversion with fromJSON
+        shell: pwsh
+        run: |
+          $boolInput = ${{ fromJSON(needs.resolve-config.outputs.bool_input) }}
+          $anotherBool = ${{ fromJSON(needs.resolve-config.outputs.another_bool) }}
+          Write-Host "bool_input (fromJSON): $boolInput (type: $($boolInput.GetType().Name))"
+          Write-Host "another_bool (fromJSON): $anotherBool (type: $($anotherBool.GetType().Name))"
+          if ($boolInput) {
+            Write-Host "bool_input logic works!"
+          } else {
+            Write-Host "bool_input logic is false."
+          }
+          if ($anotherBool) {
+            Write-Host "another_bool logic works!"
+          } else {
+            Write-Host "another_bool logic is false."
+          }
