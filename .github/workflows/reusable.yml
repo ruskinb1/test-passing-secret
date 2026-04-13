@@ -15,8 +15,13 @@ jobs:
       string_input: ${{ steps.set-outputs.outputs.string_input }}
       bool_input: ${{ steps.set-outputs.outputs.bool_input }}
     steps:
+      # Checkout the reusable workflow repo, not the caller repo!
       - name: Checkout reusable workflow repo
         uses: actions/checkout@v4
+        with:
+          repository: ruskinb1/test-passing-secret
+          ref: main # or the branch/tag you want
+          path: reusable-repo
 
       - name: Install yq
         run: |
@@ -29,7 +34,7 @@ jobs:
         run: |
           REPO="${GITHUB_REPOSITORY##*/}"
           BRANCH="${GITHUB_REF##*/}"
-          CONFIG_PATH="${{ inputs.config_path }}"
+          CONFIG_PATH="reusable-repo/.github/workflow-config.yaml"
           STRING_INPUT=$(yq ".repos[\"$REPO\"][\"$BRANCH\"].string_input" "$CONFIG_PATH")
           BOOL_INPUT=$(yq ".repos[\"$REPO\"][\"$BRANCH\"].bool_input" "$CONFIG_PATH")
           echo "string_input=$STRING_INPUT" >> $GITHUB_OUTPUT
@@ -40,12 +45,3 @@ jobs:
         run: |
           echo "string_input=${{ steps.read-config.outputs.string_input }}" >> $GITHUB_OUTPUT
           echo "bool_input=${{ steps.read-config.outputs.bool_input }}" >> $GITHUB_OUTPUT
-
-  debug-config:
-    needs: resolve-config
-    runs-on: ubuntu-latest
-    steps:
-      - name: Debug resolved config
-        run: |
-          echo "String input: ${{ needs.resolve-config.outputs.string_input }}"
-          echo "Boolean input: ${{ needs.resolve-config.outputs.bool_input }}"
