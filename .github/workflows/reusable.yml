@@ -63,11 +63,15 @@ jobs:
       
           foreach ($key in $keys) {
             # Fetch value from config using yq
-            $configValue = $(yq e ".repos.`"$repo`".`"$branch`".$key" $config_path)
+            # Try repo/branch value first
+            $repoValue = $(yq e ".repos.`"$repo`".`"$branch`".$key" $config_path)
+            # If repoValue is null or empty, try .default
+            if ([string]::IsNullOrEmpty($repoValue) -or $repoValue -eq "null") {
+              $repoValue = $(yq e ".repos.\".default\".$key" $config_path)
+            }
             $inputValue = $inputVars[$key]
-      
             if ([string]::IsNullOrEmpty($inputValue) -or $inputValue -eq "null") {
-              $value = $configValue
+              $value = $repoValue
             } else {
               $value = $inputValue
             }
