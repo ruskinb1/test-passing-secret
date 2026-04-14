@@ -95,8 +95,8 @@ jobs:
         run: |
           $boolInput = ${{ fromJSON(needs.resolve-config.outputs.bool_input) }}
           $anotherBool = ${{ fromJSON(needs.resolve-config.outputs.another_bool) }}
-          Write-Host "bool_input (fromJSON): $boolInput (type: $($boolInput.GetType().Name))"
-          Write-Host "another_bool (fromJSON): $anotherBool (type: $($anotherBool.GetType().Name))"
+          Write-Host "bool_input : $boolInput"
+          Write-Host "another_bool : $anotherBool "
           if ($boolInput) {
             Write-Host "bool_input logic works!"
           } else {
