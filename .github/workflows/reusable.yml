@@ -41,7 +41,7 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://github.com/mikefarah/yq/releases/latest/download/yq_windows_amd64.exe" -OutFile "$env:GITHUB_WORKSPACE\yq.exe"
 
-      - name: Dynamically resolve and output all inputs
+      - name: Resolve and output all inputs
         id: set-outputs
         shell: pwsh
         run: |
@@ -53,9 +53,6 @@ jobs:
             $branch = "${env:GITHUB_REF}".Split('/')[-1]
           }
           $configPath = "${{ inputs.config_path }}"
-
-          $stringInputs = @("string_input", "another_string")
-          $boolInputs = @("bool_input", "another_bool")
 
           # Map all possible workflow_call inputs
           $inputsMap = @{
@@ -69,38 +66,25 @@ jobs:
             $wfInput = $inputsMap[$inputName]
             if ([string]::IsNullOrEmpty($wfInput) -or $wfInput -eq 'null') {
               $yqExpr = ".repos.`"$repo`".`"$branch`"." + $inputName
-              Write-Host "YQ Expression: $yqExpr"
-              Write-Host "Config Path: $configPath"
               return (& "$env:GITHUB_WORKSPACE\yq.exe" e "$yqExpr" "$configPath")
             } else {
               return $wfInput
             }
           }
 
-          foreach ($inputName in $stringInputs) {
-            $val = Get-InputValue $inputName
-            Write-Host "$inputName=$val"
-            "$inputName=$val" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          }
+          $string_input = Get-InputValue "string_input"
+          $another_string = Get-InputValue "another_string"
+          $bool_input = Get-InputValue "bool_input"
+          $another_bool = Get-InputValue "another_bool"
 
-          foreach ($inputName in $boolInputs) {
-            $val = Get-InputValue $inputName
-            if ($val.ToString().ToLower() -eq "true") { $boolString = "true" }
-            else { $boolString = "false" }
-            Write-Host "$inputName=$boolString"
-            "$inputName=$boolString" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          # Output as strings (booleans as "true"/"false")
+          if ($bool_input.ToString().ToLower() -eq "true") { $bool_input_str = "true" } else { $bool_input_str = "false" }
+          if ($another_bool.ToString().ToLower() -eq "true") { $another_bool_str = "true" } else { $another_bool_str = "false" }
 
-  debug-config:
-    needs: resolve-config
-    runs-on: windows-latest
-    steps:
-      - name: Debug resolved config
-        shell: pwsh
-        run: |
-          Write-Host "string_input: ${{ needs.resolve-config.outputs.string_input }}"
-          Write-Host "another_string: ${{ needs.resolve-config.outputs.another_string }}"
-          Write-Host "bool_input: ${{ needs.resolve-config.outputs.bool_input }}"
-          Write-Host "another_bool: ${{ needs.resolve-config.outputs.another_bool }}"
+          "string_input=$string_input" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "another_string=$another_string" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "bool_input=$bool_input_str" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "another_bool=$another_bool_str" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
   check-booleans:
     needs: resolve-config
