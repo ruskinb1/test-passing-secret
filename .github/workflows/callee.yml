@@ -1,0 +1,36 @@
+name: Callee Workflow
+
+on:
+  workflow_call:
+    inputs:
+      string_input:
+        required: true
+        type: string
+      another_string:
+        required: true
+        type: string
+      bool_input:
+        required: true
+        type: boolean
+      another_bool:
+        required: true
+        type: boolean
+
+jobs:
+  test-inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show all inputs
+        run: |
+          echo "string_input: ${{ inputs.string_input }}"
+          echo "another_string: ${{ inputs.another_string }}"
+          echo "bool_input: ${{ inputs.bool_input }}"
+          echo "another_bool: ${{ inputs.another_bool }}"
+
+      - name: Run if bool_input is true
+        if: ${{ inputs.bool_input }}
+        run: echo "bool_input is TRUE!"
+
+      - name: Run if another_bool is false
+        if: ${{ !inputs.another_bool }}
+        run: echo "another_bool is FALSE!"
