@@ -50,7 +50,7 @@ jobs:
           if ("${env:GITHUB_EVENT_NAME}" -eq "pull_request") {
             $branch = "${env:GITHUB_HEAD_REF}"
           } else {
-            $branch = "${env:GITHUB_REF}".Split('/')[-1]
+            $branch = "${env:GITHUB_REF_NAME}"
           }
           $configPath = "${{ inputs.config_path }}"
 
