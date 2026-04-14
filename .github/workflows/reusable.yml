@@ -6,7 +6,7 @@ on:
       config_path:
         required: false
         type: string
-        default: 'reusable-repo/.github/workflow-config.yaml'
+        default: '.github/workflow-config.yaml'
       string_input:
         required: false
         type: string
@@ -22,89 +22,42 @@ on:
 
 jobs:
   resolve-config:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     outputs:
       string_input: ${{ steps.set-outputs.outputs.string_input }}
       another_string: ${{ steps.set-outputs.outputs.another_string }}
       bool_input: ${{ steps.set-outputs.outputs.bool_input }}
       another_bool: ${{ steps.set-outputs.outputs.another_bool }}
     steps:
-      - name: Checkout reusable workflow repo
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          repository: ruskinb1/test-passing-secret
-          ref: main
-          path: reusable-repo
 
-      - name: Download yq for Windows
-        shell: pwsh
+      - name: Download yq
         run: |
-          Invoke-WebRequest -Uri "https://github.com/mikefarah/yq/releases/latest/download/yq_windows_amd64.exe" -OutFile "$env:GITHUB_WORKSPACE\yq.exe"
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
 
-      - name: Resolve and output all inputs
+      - name: Fetch values from config
         id: set-outputs
-        shell: pwsh
         run: |
-          $env:PATH += ";$env:GITHUB_WORKSPACE"
-          $repo = "${env:GITHUB_REPOSITORY}".Split('/')[-1]
-          if ("${env:GITHUB_EVENT_NAME}" -eq "pull_request") {
-            $branch = "${env:GITHUB_HEAD_REF}"
-          } else {
-            $branch = "${env:GITHUB_REF_NAME}"
-          }
-          $configPath = "${{ inputs.config_path }}"
+          repo="${GITHUB_REPOSITORY##*/}"
+          branch="${GITHUB_REF##*/}"
+          config_path="${{ inputs.config_path }}"
+          string_input=$(yq e ".repos.\"$repo\".\"$branch\".string_input" "$config_path")
+          another_string=$(yq e ".repos.\"$repo\".\"$branch\".another_string" "$config_path")
+          bool_input=$(yq e ".repos.\"$repo\".\"$branch\".bool_input" "$config_path")
+          another_bool=$(yq e ".repos.\"$repo\".\"$branch\".another_bool" "$config_path")
+          echo "string_input=$string_input" >> $GITHUB_OUTPUT
+          echo "another_string=$another_string" >> $GITHUB_OUTPUT
+          echo "bool_input=$bool_input" >> $GITHUB_OUTPUT
 
-          # Map all possible workflow_call inputs
-          $inputsMap = @{
-            "string_input"   = "${{ inputs.string_input }}"
-            "another_string" = "${{ inputs.another_string }}"
-            "bool_input"     = "${{ inputs.bool_input }}"
-            "another_bool"   = "${{ inputs.another_bool }}"
-          }
+          echo "another_bool=$another_bool" >> $GITHUB_OUTPUT
 
-          function Get-InputValue($inputName) {
-            $wfInput = $inputsMap[$inputName]
-            if ([string]::IsNullOrEmpty($wfInput) -or $wfInput -eq 'null') {
-              $yqExpr = ".repos.`"$repo`".`"$branch`"." + $inputName
-              return (& "$env:GITHUB_WORKSPACE\yq.exe" e "$yqExpr" "$configPath")
-            } else {
-              return $wfInput
-            }
-          }
-
-          $string_input = Get-InputValue "string_input"
-          $another_string = Get-InputValue "another_string"
-          $bool_input = Get-InputValue "bool_input"
-          $another_bool = Get-InputValue "another_bool"
-
-          # Output as strings (booleans as "true"/"false")
-          if ($bool_input.ToString().ToLower() -eq "true") { $bool_input_str = "true" } else { $bool_input_str = "false" }
-          if ($another_bool.ToString().ToLower() -eq "true") { $another_bool_str = "true" } else { $another_bool_str = "false" }
-
-          "string_input=$string_input" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "another_string=$another_string" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "bool_input=$bool_input_str" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "another_bool=$another_bool_str" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-  use-config:
+  call-callee:
     needs: resolve-config
-    runs-on: windows-latest
-    steps:
-      - name: Use booleans via env with fromJSON
-        shell: pwsh
-        env:
-          BOOL_INPUT: ${{ fromJSON(needs.resolve-config.outputs.bool_input) }}
-          ANOTHER_BOOL: ${{ fromJSON(needs.resolve-config.outputs.another_bool) }}
-        run: |
-          Write-Host "BOOL_INPUT: $env:BOOL_INPUT (type: $($env:BOOL_INPUT.GetType().Name))"
-          Write-Host "ANOTHER_BOOL: $env:ANOTHER_BOOL (type: $($env:ANOTHER_BOOL.GetType().Name))"
-          if ($env:BOOL_INPUT) {
-            Write-Host "bool_input logic works!"
-          } else {
-            Write-Host "bool_input logic is false."
-          }
-          if ($env:ANOTHER_BOOL) {
-            Write-Host "another_bool logic works!"
-          } else {
-            Write-Host "another_bool logic is false."
-          }
+    uses: ./.github/workflows/callee.yml
+    with:
+      string_input: ${{ needs.resolve-config.outputs.string_input }}
+      another_string: ${{ needs.resolve-config.outputs.another_string }}
+      bool_input: ${{ fromJSON(needs.resolve-config.outputs.bool_input) }}
+      another_bool: ${{ fromJSON(needs.resolve-config.outputs.another_bool) }}
