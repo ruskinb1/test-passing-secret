@@ -50,29 +50,20 @@ jobs:
           repo="${GITHUB_REPOSITORY##*/}"
           branch="${GITHUB_REF##*/}"
           config_path="reusable-repo/.github/workflow-config.yaml"
-
-          # Fetch from config
-          config_string_input=$(yq e ".repos.\"$repo\".\"$branch\".string_input" "$config_path")
-          config_another_string=$(yq e ".repos.\"$repo\".\"$branch\".another_string" "$config_path")
-          config_bool_input=$(yq e ".repos.\"$repo\".\"$branch\".bool_input" "$config_path")
-          config_another_bool=$(yq e ".repos.\"$repo\".\"$branch\".another_bool" "$config_path")
-
-          # Use input if provided, else config value
-          string_input="${{ inputs.string_input }}"
-          another_string="${{ inputs.another_string }}"
-          bool_input="${{ inputs.bool_input }}"
-          another_bool="${{ inputs.another_bool }}"
-
-          # Fallback logic
-          [[ -z "$string_input" || "$string_input" == 'null' ]] && string_input="$config_string_input"
-          [[ -z "$another_string" || "$another_string" == 'null' ]] && another_string="$config_another_string"
-          [[ -z "$bool_input" || "$bool_input" == 'null' ]] && bool_input="$config_bool_input"
-          [[ -z "$another_bool" || "$another_bool" == 'null' ]] && another_bool="$config_another_bool"
-
-          echo "string_input=$string_input" >> $GITHUB_OUTPUT
-          echo "another_string=$another_string" >> $GITHUB_OUTPUT
-          echo "bool_input=$bool_input" >> $GITHUB_OUTPUT
-          echo "another_bool=$another_bool" >> $GITHUB_OUTPUT
+      
+          declare -A input_vars=(
+            [string_input]="${{ inputs.string_input }}"
+            [another_string]="${{ inputs.another_string }}"
+            [bool_input]="${{ inputs.bool_input }}"
+            [another_bool]="${{ inputs.another_bool }}"
+          )
+      
+          for key in "${!input_vars[@]}"; do
+            config_value=$(yq e ".repos.\"$repo\".\"$branch\".$key" "$config_path")
+            value="${input_vars[$key]}"
+            [[ -z "$value" || "$value" == 'null' ]] && value="$config_value"
+            echo "$key=$value" >> $GITHUB_OUTPUT
+          done
 
   call-callee:
     needs: resolve-config
