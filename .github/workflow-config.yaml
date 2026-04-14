@@ -8,5 +8,5 @@ repos:
     develop:
       string_input: "value-for-develop"
       another_string: "dev-hello"
-      bool_input: false
-      another_bool: true
+      bool_input: true
+      another_bool: false
