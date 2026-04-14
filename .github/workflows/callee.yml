@@ -28,9 +28,9 @@ jobs:
           echo "another_bool: ${{ inputs.another_bool }}"
 
       - name: Run if bool_input is true
-        if: ${{ inputs.bool_input }}
+        if: ${{ inputs.bool_input == 'true' }}
         run: echo "bool_input is TRUE!"
 
       - name: Run if another_bool is false
-        if: ${{ !inputs.another_bool }}
+        if: ${{ inputs.another_bool == 'false'}}
         run: echo "another_bool is FALSE!"
