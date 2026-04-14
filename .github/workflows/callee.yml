@@ -16,6 +16,9 @@ on:
         required: true
         type: boolean
 
+env:
+  another_bool: ${{ inputs.another_bool }}
+  bool_input: ${{ inputs.bool_input }}
 jobs:
   test-inputs:
     runs-on: ubuntu-latest
@@ -28,9 +31,9 @@ jobs:
           echo "another_bool: ${{ inputs.another_bool }}"
 
       - name: Run if bool_input is true
-        if: ${{ inputs.bool_input == 'true' }}
+        if: env.bool_input == 'true'
         run: echo "bool_input is TRUE!"
 
       - name: Run if another_bool is false
-        if: ${{ inputs.another_bool == 'false'}}
+        if: env.another_bool == 'true'
         run: echo "another_bool is FALSE!"
