@@ -86,23 +86,24 @@ jobs:
           "bool_input=$bool_input_str" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "another_bool=$another_bool_str" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-  check-booleans:
+  use-config:
     needs: resolve-config
     runs-on: windows-latest
     steps:
-      - name: Check boolean conversion with fromJSON
+      - name: Use booleans via env with fromJSON
         shell: pwsh
+        env:
+          BOOL_INPUT: ${{ fromJSON(needs.resolve-config.outputs.bool_input) }}
+          ANOTHER_BOOL: ${{ fromJSON(needs.resolve-config.outputs.another_bool) }}
         run: |
-          $boolInput = ${{ fromJSON(needs.resolve-config.outputs.bool_input) }}
-          $anotherBool = ${{ fromJSON(needs.resolve-config.outputs.another_bool) }}
-          Write-Host "bool_input : $boolInput"
-          Write-Host "another_bool : $anotherBool "
-          if ($boolInput) {
+          Write-Host "BOOL_INPUT: $env:BOOL_INPUT (type: $($env:BOOL_INPUT.GetType().Name))"
+          Write-Host "ANOTHER_BOOL: $env:ANOTHER_BOOL (type: $($env:ANOTHER_BOOL.GetType().Name))"
+          if ($env:BOOL_INPUT) {
             Write-Host "bool_input logic works!"
           } else {
             Write-Host "bool_input logic is false."
           }
-          if ($anotherBool) {
+          if ($env:ANOTHER_BOOL) {
             Write-Host "another_bool logic works!"
           } else {
             Write-Host "another_bool logic is false."
