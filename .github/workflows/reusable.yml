@@ -32,6 +32,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout reusable workflow repo
+        uses: actions/checkout@v4
+        with:
+          repository: ruskinb1/test-passing-secret
+          ref: main
+          path: reusable-repo
+
       - name: Download yq
         run: |
           sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
@@ -42,7 +49,7 @@ jobs:
         run: |
           repo="${GITHUB_REPOSITORY##*/}"
           branch="${GITHUB_REF##*/}"
-          config_path="${{ inputs.config_path }}"
+          config_path="reusable-repo/.github/workflow-config.yaml"
           string_input=$(yq e ".repos.\"$repo\".\"$branch\".string_input" "$config_path")
           another_string=$(yq e ".repos.\"$repo\".\"$branch\".another_string" "$config_path")
           bool_input=$(yq e ".repos.\"$repo\".\"$branch\".bool_input" "$config_path")
