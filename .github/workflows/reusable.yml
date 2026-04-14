@@ -46,24 +46,34 @@ jobs:
 
       - name: Fetch values from config or inputs
         id: set-outputs
+        shell: pwsh
         run: |
-          repo="${GITHUB_REPOSITORY##*/}"
-          branch="${GITHUB_REF##*/}"
-          config_path="reusable-repo/.github/workflow-config.yaml"
+          $repo = "${env:GITHUB_REPOSITORY}".Split('/')[-1]
+          $branch = "${env:GITHUB_REF}".Split('/')[-1]
+          $config_path = "reusable-repo/.github/workflow-config.yaml"
       
-          declare -A input_vars=(
-            [string_input]="${{ inputs.string_input }}"
-            [another_string]="${{ inputs.another_string }}"
-            [bool_input]="${{ inputs.bool_input }}"
-            [another_bool]="${{ inputs.another_bool }}"
-          )
+          # Define the keys and their corresponding input environment variables
+          $keys = @("string_input", "another_string", "bool_input", "another_bool")
+          $inputVars = @{
+            "string_input"    = "${{ inputs.string_input }}"
+            "another_string"  = "${{ inputs.another_string }}"
+            "bool_input"      = "${{ inputs.bool_input }}"
+            "another_bool"    = "${{ inputs.another_bool }}"
+          }
       
-          for key in "${!input_vars[@]}"; do
-            config_value=$(yq e ".repos.\"$repo\".\"$branch\".$key" "$config_path")
-            value="${input_vars[$key]}"
-            [[ -z "$value" || "$value" == 'null' ]] && value="$config_value"
-            echo "$key=$value" >> $GITHUB_OUTPUT
-          done
+          foreach ($key in $keys) {
+            # Fetch value from config using yq
+            $configValue = $(yq e ".repos.`"$repo`".`"$branch`".$key" $config_path)
+            $inputValue = $inputVars[$key]
+      
+            if ([string]::IsNullOrEmpty($inputValue) -or $inputValue -eq "null") {
+              $value = $configValue
+            } else {
+              $value = $inputValue
+            }
+            # Output to GITHUB_OUTPUT
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "$key=$value"
+          }
 
   call-callee:
     needs: resolve-config
