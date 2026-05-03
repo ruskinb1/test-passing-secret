@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: List Input Keys
+        if: ${{ github.run_attempt == 1 }}
         env:
           INPUTS_JSON: ${{ toJSON(inputs) }}
         run: echo "$INPUTS_JSON"
