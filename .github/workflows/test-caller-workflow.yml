@@ -12,9 +12,7 @@ on:
 
   push:
     branches:
-      - main
-      - '20*-main'
-      - feature-branch
+      - main*
 
   pull_request:
 
